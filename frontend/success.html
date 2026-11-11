@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payment result</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    #status { font-size: 1.1rem; }
+    .paid { color: #1b7f3b; } .failed { color: #b00020; } .pending { color: #8a6d00; }
+  </style>
+</head>
+<body>
+  <h1>Payment result</h1>
+  <p id="status" class="pending">Checking your payment...</p>
+  <p><a href="/">Back to checkout</a></p>
+
+  <script>
+    const statusBox = document.getElementById("status");
+    const orderId = new URLSearchParams(location.search).get("orderId");
+
+    // The page only DISPLAYS the result. Only the webhook marks an order as paid.
+    // Poll OUR database every 1.5 seconds until the webhook has run
+    async function pollOrder(triesLeft = 20) {
+      try {
+        const response = await fetch(`/api/orders/${orderId}`);
+        const order = await response.json();
+        if (!response.ok) throw new Error(order.error);
+
+        if (order.status === "paid") return show("Payment received. Thank you!", "paid");
+        if (order.status === "failed") return show("Payment failed. Please try again.", "failed");
+      } catch (err) {
+        return show(err.message, "failed");
+      }
+
+      if (triesLeft > 0) setTimeout(() => pollOrder(triesLeft - 1), 1500);
+      else show("Still waiting for confirmation. Refresh in a moment.", "pending");
+    }
+
+    function show(text, cssClass) {
+      statusBox.textContent = text;
+      statusBox.className = cssClass;
+    }
+
+    pollOrder();
+  </script>
+</body>
+</html>
