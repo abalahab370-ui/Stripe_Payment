@@ -21,9 +21,15 @@ Rules the code follows:
 
 ```
 backend/
-  server.js     Express setup, mounts the routes
-  checkout.js   GET /api/config, POST /api/checkout, GET /api/orders/:id
-  webhook.js    POST /webhook (signature check, order updates)
+  server.js                   Express setup, mounts the routes
+  routing/
+    checkout.js               Checkout and order-status route declarations
+    webhook.js                Webhook route declaration and raw-body middleware
+  controllers/
+    checkoutController.js     Checkout, config and order-status handlers
+    webhookController.js      Stripe webhook handling and order updates
+  middleware/
+    checkoutValidation.js     Checkout input and order-id validation
 frontend/
   index.html    Card form
   success.html  Shows the order status (polls the server)
