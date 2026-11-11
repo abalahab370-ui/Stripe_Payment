@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checkout</title>
+  <script src="https://js.stripe.com/v3/"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+    #summary { color: #555; margin-bottom: 1.5rem; }
+    button { width: 100%; margin-top: 1rem; padding: .75rem; font-size: 1rem; color: #fff; background: #1a1a1a; border: 0; border-radius: 6px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    #error { color: #b00020; margin-top: .75rem; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>Checkout</h1>
+  <p id="summary">Loading...</p>
+
+  <form id="payment-form" hidden>
+    <div id="payment-element"></div>
+    <button id="pay-button" type="submit">Pay</button>
+  </form>
+  <p id="error"></p>
+
+  <script>
+    const summary = document.getElementById("summary");
+    const form = document.getElementById("payment-form");
+    const payButton = document.getElementById("pay-button");
+    const errorBox = document.getElementById("error");
+
+    let stripe, elements, orderId; // declared here so the submit handler can use them
+
+    async function initialize() {
+      try {
+        // Product comes from the URL, for example /?product=mug
+        const productId = new URLSearchParams(location.search).get("product") || "tshirt";
+
+        // 1. Who we are (the publishable key is safe to expose)
+        const config = await (await fetch("/api/config")).json();
+        stripe = Stripe(config.publishableKey);
+
+        // 2. Ask OUR server, not Stripe
+        const response = await fetch("/api/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productId }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error);
+        orderId = data.orderId;
+
+        const price = new Intl.NumberFormat("en-US", { style: "currency", currency: data.currency })
+          .format(data.amount / 100);
+        summary.textContent = `${data.productName} - ${price}`;
+
+        // 3. A widget tied to this one payment
+        elements = stripe.elements({ clientSecret: data.clientSecret });
+
+        // 4. The card form appears
+        elements.create("payment").mount("#payment-element");
+        form.hidden = false;
+      } catch (err) {
+        summary.textContent = "";
+        errorBox.textContent = err.message || "Could not start checkout.";
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault(); // stop the page reload
+      payButton.disabled = true;
+      errorBox.textContent = "";
+
+      const { error } = await stripe.confirmPayment({
+        elements, // finds the card details and the clientSecret
+        confirmParams: { return_url: `${location.origin}/success.html?orderId=${orderId}` },
+      });
+
+      // Only reached when something went wrong (on success the browser is redirected)
+      errorBox.textContent = error.message;
+      payButton.disabled = false;
+    });
+
+    initialize();
+  </script>
+</body>
+</html>
