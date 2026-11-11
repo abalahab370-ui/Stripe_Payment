@@ -4,7 +4,8 @@
   "description": "Minimal Stripe payment flow: checkout, webhook and Postgres orders",
   "private": true,
   "scripts": {
-    "start": "node backend/server.js"
+    "start": "node backend/server.js" ,
+    "dev" : "node backend/server.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
