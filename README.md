@@ -5,10 +5,9 @@ A minimal Stripe payment flow with an Express backend, a plain HTML frontend and
 ## How it works
 
 1. The browser asks the server to buy a product (`POST /api/checkout`).
-2. The server creates an order (`pending`) and a Stripe PaymentIntent, then returns only the `clientSecret`.
+2. The server locks the product row, reserves one unit, creates a pending order, then creates a Stripe PaymentIntent and returns only the `clientSecret`.
 3. The browser shows Stripe's card form. The card goes straight to Stripe and never touches this server.
-4. Stripe calls `POST /webhook` with the result.
-5. The webhook marks the order as `paid` (or `failed`) in the database.
+4. Stripe calls `POST /webhook` with the result. Successful payment converts reserved stock into sold stock; cancellation releases the reservation.
 
 Rules the code follows:
 
@@ -16,24 +15,24 @@ Rules the code follows:
 - The secret key never leaves the server.
 - Only the webhook marks an order as paid, never the success page.
 - The webhook verifies the signature, answers quickly and is safe to run twice.
+- Product prices and inventory come from PostgreSQL; row locks and database constraints prevent overselling.
 
 ## Project structure
 
 ```
 backend/
   server.js                   Express setup, mounts the routes
+  db.js                       PostgreSQL connection and transaction helper
   routing/
     checkout.js               Checkout and order-status route declarations
     webhook.js                Webhook route declaration and raw-body middleware
   controllers/
     checkoutController.js     Checkout, config and order-status handlers
     webhookController.js      Stripe webhook handling and order updates
-  middleware/
-    checkoutValidation.js     Checkout input and order-id validation
 frontend/
   index.html    Card form
   success.html  Shows the order status (polls the server)
-schema.sql      The orders table
+schema.sql      Product catalog, inventory and orders tables
 .env.example    Environment variable names
 ```
 
@@ -47,25 +46,16 @@ Requirements: Node 18 or newer, a Stripe account in test mode, a Supabase projec
    npm install
    ```
 
-2. Create the table by running `schema.sql` in the Supabase SQL editor.
+2. Run `schema.sql` in the Supabase SQL editor. It creates example T-shirt and mug rows with stock 10 each; change the example prices and quantities or add your own products there. When migrating a database with existing orders, reconcile product stock before enabling checkout.
 
-3. Create `backend/db.js` with your own connection (pg and the Supabase connection string). The backend files expect it to export a `query` function:
-
-   ```js
-   // backend/db.js
-   const query = async (text, params) => {
-     return await pool.query(text, params);
-   };
-   module.exports = { query };
-   ```
-
-4. Copy `.env.example` to `.env` and fill in the values:
+3. Copy `.env.example` to `.env` and fill in the values:
 
    | Variable | Where to find it |
    | --- | --- |
    | `STRIPE_SECRET_KEY` | Stripe Dashboard, Developers, API keys (sk_test_...) |
    | `STRIPE_PUBLISHABLE_KEY` | Same page (pk_test_...) |
    | `STRIPE_WEBHOOK_SECRET` | Printed by `stripe listen` (whsec_...) |
+   | `DATABASE_URL` | PostgreSQL/Supabase connection string (`sslmode=require` for Supabase) |
    | `PORT` | Any free port, default 3000 |
 
 ## Run locally
@@ -84,7 +74,7 @@ Terminal 2, start the server (restart it after editing `.env`):
 npm start
 ```
 
-Open `http://localhost:3000/` and pay with a test card. To try the other product, open `http://localhost:3000/?product=mug`.
+Open `http://localhost:3000/`, choose an in-stock product and pay with a test card. To preselect a product, add its database id to the URL, for example `/?product=mug`.
 
 | Test card | Result |
 | --- | --- |
@@ -101,9 +91,12 @@ Expected result: the page redirects to `success.html`, which shows pending for a
 | Route | Description |
 | --- | --- |
 | `GET /api/config` | Returns the publishable key |
-| `POST /api/checkout` | Body: `{ "productId": "tshirt" }`. Creates the order and the PaymentIntent, returns `clientSecret` |
+| `GET /api/products` | Returns the database product catalog and available stock |
+| `POST /api/checkout` | Body: `{ "productId": "<database product id>" }`. Reserves one item, creates the order and PaymentIntent, returns `clientSecret` |
 | `GET /api/orders/:id` | Returns the order status |
 | `POST /webhook` | Called by Stripe only |
+
+Inventory reservations remain held while a PaymentIntent can still be retried. A canceled PaymentIntent releases its reservation; failed payment attempts do not release stock because Stripe allows the customer to retry that intent.
 
 ## Troubleshooting
 

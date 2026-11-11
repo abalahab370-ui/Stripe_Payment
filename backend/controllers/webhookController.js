@@ -1,5 +1,5 @@
 const Stripe = require("stripe");
-const { query } = require("../db");
+const { withTransaction } = require("../db");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -26,6 +26,9 @@ async function handleWebhook(req, res) {
       case "payment_intent.payment_failed":
         await handlePaymentFailed(event.data.object);
         break;
+      case "payment_intent.canceled":
+        await handlePaymentCanceled(event.data.object);
+        break;
       default:
         console.log(`[webhook] ignoring ${event.type}`);
     }
@@ -39,39 +42,94 @@ async function handleWebhook(req, res) {
 
 async function handlePaymentSucceeded(paymentIntent) {
   const orderId = Number(paymentIntent.metadata.orderId);
-  if (!orderId) return;
+  if (!Number.isSafeInteger(orderId) || orderId < 1) return;
 
-  const { rows } = await query("SELECT amount FROM orders WHERE id = $1", [orderId]);
-  if (rows.length === 0) return;
+  const result = await withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT product_id, quantity, amount, currency, status, payment_intent_id
+         FROM orders
+        WHERE id = $1
+        FOR UPDATE`,
+      [orderId]
+    );
+    if (rows.length === 0 || rows[0].status !== "pending") return "ignored";
 
-  if (paymentIntent.amount_received !== rows[0].amount) {
-    console.error(`[webhook] AMOUNT MISMATCH on order ${orderId}`);
-    return;
+    const order = rows[0];
+    if (
+      order.payment_intent_id !== paymentIntent.id ||
+      paymentIntent.amount_received !== order.amount ||
+      paymentIntent.currency !== order.currency.toLowerCase()
+    ) {
+      console.error(`[webhook] PAYMENT MISMATCH on order ${orderId}`);
+      return "mismatch";
+    }
+
+    const inventory = await client.query(
+      `UPDATE products
+          SET stock = stock - $1,
+              reserved_stock = reserved_stock - $1
+        WHERE id = $2 AND stock >= $1 AND reserved_stock >= $1`,
+      [order.quantity, order.product_id]
+    );
+    if (inventory.rowCount !== 1) {
+      throw new Error(`Could not commit reserved inventory for order ${orderId}`);
+    }
+
+    await client.query(
+      "UPDATE orders SET status = 'paid', paid_at = NOW() WHERE id = $1",
+      [orderId]
+    );
+    return "paid";
+  });
+
+  if (result === "paid") {
+    console.log(`[webhook] order ${orderId} marked as PAID`);
+  } else if (result === "ignored") {
+    console.log(`[webhook] order ${orderId} is no longer pending; duplicate ignored`);
   }
-
-  const result = await query(
-    `UPDATE orders
-        SET status = 'paid', paid_at = NOW(),
-            payment_intent_id = COALESCE(payment_intent_id, $1)
-      WHERE id = $2 AND status != 'paid'`,
-    [paymentIntent.id, orderId]
-  );
-
-  console.log(
-    result.rowCount > 0
-      ? `[webhook] order ${orderId} marked as PAID`
-      : `[webhook] order ${orderId} already paid, duplicate ignored`
-  );
 }
 
 async function handlePaymentFailed(paymentIntent) {
-  const orderId = Number(paymentIntent.metadata.orderId);
-  if (!orderId) return;
+  console.log(
+    `[webhook] payment attempt failed for order ${paymentIntent.metadata.orderId}; reservation retained for retry`
+  );
+}
 
-  await query("UPDATE orders SET status = 'failed' WHERE id = $1 AND status = 'pending'", [
-    orderId,
-  ]);
-  console.log(`[webhook] order ${orderId} marked as FAILED`);
+async function handlePaymentCanceled(paymentIntent) {
+  const orderId = Number(paymentIntent.metadata.orderId);
+  if (!Number.isSafeInteger(orderId) || orderId < 1) return;
+
+  const released = await withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT product_id, quantity, status, payment_intent_id
+         FROM orders
+        WHERE id = $1
+        FOR UPDATE`,
+      [orderId]
+    );
+    if (
+      rows.length === 0 ||
+      rows[0].status !== "pending" ||
+      rows[0].payment_intent_id !== paymentIntent.id
+    ) {
+      return false;
+    }
+
+    const order = rows[0];
+    const inventory = await client.query(
+      `UPDATE products
+          SET reserved_stock = reserved_stock - $1
+        WHERE id = $2 AND reserved_stock >= $1`,
+      [order.quantity, order.product_id]
+    );
+    if (inventory.rowCount !== 1) {
+      throw new Error(`Could not release reserved inventory for order ${orderId}`);
+    }
+
+    await client.query("UPDATE orders SET status = 'failed' WHERE id = $1", [orderId]);
+    return true;
+  });
+  if (released) console.log(`[webhook] order ${orderId} canceled; reservation released`);
 }
 
 module.exports = { handleWebhook };

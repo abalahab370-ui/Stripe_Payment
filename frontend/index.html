@@ -18,6 +18,12 @@
   <h1>Checkout</h1>
   <p id="summary">Loading...</p>
 
+  <div id="product-picker" hidden>
+    <label for="product-select">Product</label>
+    <select id="product-select"></select>
+    <button id="checkout-button" type="button">Continue to payment</button>
+  </div>
+
   <form id="payment-form" hidden>
     <div id="payment-element"></div>
     <button id="pay-button" type="submit">Pay</button>
@@ -26,46 +32,97 @@
 
   <script>
     const summary = document.getElementById("summary");
+    const productPicker = document.getElementById("product-picker");
+    const productSelect = document.getElementById("product-select");
+    const checkoutButton = document.getElementById("checkout-button");
     const form = document.getElementById("payment-form");
     const payButton = document.getElementById("pay-button");
     const errorBox = document.getElementById("error");
 
-    let stripe, elements, orderId; // declared here so the submit handler can use them
+    let stripe, elements, orderId, products;
 
     async function initialize() {
       try {
-        // Product comes from the URL, for example /?product=mug
-        const productId = new URLSearchParams(location.search).get("product") || "tshirt";
+        const [configResponse, productsResponse] = await Promise.all([
+          fetch("/api/config"),
+          fetch("/api/products"),
+        ]);
+        const config = await configResponse.json();
+        const catalog = await productsResponse.json();
+        if (!configResponse.ok) throw new Error(config.error || "Could not load payment settings.");
+        if (!productsResponse.ok) throw new Error(catalog.error || "Could not load products.");
 
-        // 1. Who we are (the publishable key is safe to expose)
-        const config = await (await fetch("/api/config")).json();
         stripe = Stripe(config.publishableKey);
+        products = catalog.products;
+        for (const product of products) {
+          const option = document.createElement("option");
+          option.value = product.id;
+          const price = new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: product.currency,
+          }).format(product.amount / 100);
+          option.textContent = product.available_stock > 0
+            ? `${product.name} - ${price} (${product.available_stock} available)`
+            : `${product.name} - ${price} (out of stock)`;
+          option.disabled = product.available_stock < 1;
+          productSelect.append(option);
+        }
 
-        // 2. Ask OUR server, not Stripe
-        const response = await fetch("/api/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ productId }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error);
-        orderId = data.orderId;
+        const requestedProduct = new URLSearchParams(location.search).get("product");
+        if (requestedProduct && [...productSelect.options].some((option) => option.value === requestedProduct)) {
+          productSelect.value = requestedProduct;
+        }
+        if (productSelect.selectedOptions[0]?.disabled) {
+          const availableProduct = [...productSelect.options].find((option) => !option.disabled);
+          if (availableProduct) productSelect.value = availableProduct.value;
+        }
 
-        const price = new Intl.NumberFormat("en-US", { style: "currency", currency: data.currency })
-          .format(data.amount / 100);
-        summary.textContent = `${data.productName} - ${price}`;
-
-        // 3. A widget tied to this one payment
-        elements = stripe.elements({ clientSecret: data.clientSecret });
-
-        // 4. The card form appears
-        elements.create("payment").mount("#payment-element");
-        form.hidden = false;
+        productPicker.hidden = products.length === 0;
+        checkoutButton.disabled = ![...productSelect.options].some((option) => !option.disabled);
+        if (products.length === 0) {
+          summary.textContent = "No products are available.";
+        } else {
+          updateProductSummary();
+        }
       } catch (err) {
         summary.textContent = "";
         errorBox.textContent = err.message || "Could not start checkout.";
       }
     }
+
+    function updateProductSummary() {
+      const product = products.find((item) => item.id === productSelect.value);
+      if (!product) return;
+      const price = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: product.currency,
+      }).format(product.amount / 100);
+      summary.textContent = `${product.name} - ${price}`;
+    }
+
+    productSelect.addEventListener("change", updateProductSummary);
+
+    checkoutButton.addEventListener("click", async () => {
+      checkoutButton.disabled = true;
+      errorBox.textContent = "";
+      try {
+        const response = await fetch("/api/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productId: productSelect.value }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error);
+        orderId = data.orderId;
+        elements = stripe.elements({ clientSecret: data.clientSecret });
+        elements.create("payment").mount("#payment-element");
+        productPicker.hidden = true;
+        form.hidden = false;
+      } catch (err) {
+        errorBox.textContent = err.message || "Could not start checkout.";
+        checkoutButton.disabled = false;
+      }
+    });
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault(); // stop the page reload

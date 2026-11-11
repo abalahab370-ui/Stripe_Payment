@@ -2,17 +2,15 @@ const express = require("express");
 const {
   createCheckout,
   getConfig,
+  getProducts,
   getOrderStatus,
 } = require("../controllers/checkoutController");
-const {
-  validateCheckoutRequest,
-  validateOrderId,
-} = require("../middleware/checkoutValidation");
 
 const router = express.Router();
 
 router.get("/api/config", getConfig);
-router.post("/api/checkout", validateCheckoutRequest, createCheckout);
-router.get("/api/orders/:id", validateOrderId, getOrderStatus);
+router.get("/api/products", getProducts);
+router.post("/api/checkout", createCheckout);
+router.get("/api/orders/:id", getOrderStatus);
 
 module.exports = router;
