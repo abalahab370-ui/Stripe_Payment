@@ -5,7 +5,7 @@ A minimal Stripe payment flow with an Express backend, a plain HTML frontend and
 ## How it works
 
 1. The browser asks the server to buy a product (`POST /api/checkout`).
-2. The server locks the product row, reserves one unit, creates a pending order, then creates a Stripe PaymentIntent and returns only the `clientSecret`.
+2. The server locks the product row, reserves one unit, creates a pending order, then creates a Stripe PaymentIntent and returns its `clientSecret` and the `orderId`.
 3. The browser shows Stripe's card form. The card goes straight to Stripe and never touches this server.
 4. Stripe calls `POST /webhook` with the result. Successful payment converts reserved stock into sold stock; cancellation releases the reservation.
 
@@ -56,7 +56,8 @@ Requirements: Node 18 or newer, a Stripe account in test mode, a Supabase projec
    | `STRIPE_PUBLISHABLE_KEY` | Same page (pk_test_...) |
    | `STRIPE_WEBHOOK_SECRET` | Printed by `stripe listen` (whsec_...) |
    | `DATABASE_URL` | PostgreSQL/Supabase connection string (`sslmode=require` for Supabase) |
-   | `PORT` | Any free port, default 3000 |
+   | `PORT` | Any free port, default 5000 |
+   | `CORS_ORIGIN` | Frontend origin allowed to call the API, e.g. `http://127.0.0.1:5501` |
 
 ## Run locally
 
@@ -65,7 +66,7 @@ Use two terminals.
 Terminal 1, forward Stripe events to your machine and copy the printed `whsec_...` secret into `.env`:
 
 ```
-stripe listen --forward-to localhost:3000/webhook
+stripe listen --forward-to localhost:5000/webhook
 ```
 
 Terminal 2, start the server (restart it after editing `.env`):
@@ -74,7 +75,7 @@ Terminal 2, start the server (restart it after editing `.env`):
 npm start
 ```
 
-Open `http://localhost:3000/`, choose an in-stock product and pay with a test card. To preselect a product, add its database id to the URL, for example `/?product=mug`.
+Open `http://localhost:5000/`, choose an in-stock product and pay with a test card. To use VS Code Live Server instead, set `CORS_ORIGIN=http://127.0.0.1:5501` in `.env` and open `http://127.0.0.1:5501/frontend/index.html`; the frontend will send API requests to Express on port 5000. To preselect a product, add its database id to the URL, for example `/?product=mug`.
 
 | Test card | Result |
 | --- | --- |
@@ -104,6 +105,7 @@ Inventory reservations remain held while a PaymentIntent can still be retried. A
 | --- | --- |
 | `No signatures found matching the expected signature` | Wrong `STRIPE_WEBHOOK_SECRET`, or the server was not restarted after editing `.env` |
 | Message about a raw body or parsed object | `express.json()` was placed above the webhook route in `server.js` |
+| API requests return 404 | Open the app from `http://localhost:5000/` while Express is running, not from a separate Live Server URL |
 | Nothing logged after paying | `stripe listen` is not running or forwards to the wrong port |
 | Order stays pending | Check the server log for a signature error, `AMOUNT MISMATCH` or a missing `orderId` |
 

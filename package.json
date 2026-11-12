@@ -4,10 +4,11 @@
   "description": "Minimal Stripe payment flow: checkout, webhook and Postgres orders",
   "private": true,
   "scripts": {
-    "start": "node backend/server.js" ,
-    "dev" : "node backend/server.js"
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "pg": "^8.13.1",
