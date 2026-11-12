@@ -42,7 +42,10 @@ async function handleWebhook(req, res) {
 
 async function handlePaymentSucceeded(paymentIntent) {
   const orderId = Number(paymentIntent.metadata.orderId);
-  if (!Number.isSafeInteger(orderId) || orderId < 1) return;
+  if (!Number.isSafeInteger(orderId) || orderId < 1) {
+    console.error("[webhook] succeeded event is missing a valid orderId");
+    return;
+  }
 
   const result = await withTransaction(async (client) => {
     const { rows } = await client.query(
@@ -55,12 +58,20 @@ async function handlePaymentSucceeded(paymentIntent) {
     if (rows.length === 0 || rows[0].status !== "pending") return "ignored";
 
     const order = rows[0];
-    if (
-      order.payment_intent_id !== paymentIntent.id ||
-      paymentIntent.amount_received !== order.amount ||
-      paymentIntent.currency !== order.currency.toLowerCase()
-    ) {
-      console.error(`[webhook] PAYMENT MISMATCH on order ${orderId}`);
+    const mismatches = [];
+    if (order.payment_intent_id !== paymentIntent.id) {
+      mismatches.push("payment_intent_id");
+    }
+    if (paymentIntent.amount_received !== order.amount) {
+      mismatches.push("amount_received");
+    }
+    if (paymentIntent.currency !== order.currency.toLowerCase()) {
+      mismatches.push("currency");
+    }
+    if (mismatches.length > 0) {
+      console.error(
+        `[webhook] PAYMENT MISMATCH on order ${orderId}: ${mismatches.join(", ")}`
+      );
       return "mismatch";
     }
 

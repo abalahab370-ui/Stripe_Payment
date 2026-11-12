@@ -96,7 +96,7 @@ Create a **Web Service** for this repository and configure:
 | Build Command | `npm install && npm run build` |
 | Start Command | `npm start` |
 
-Add `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, and `DATABASE_URL` in the Render environment settings. Render supplies `PORT` automatically. If the frontend is hosted on another origin, set `CORS_ORIGIN` to that exact origin; when Render serves this frontend from the same service, leave it unset.
+Add `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, and `DATABASE_URL` in the Render environment settings. Configure a Stripe Dashboard webhook endpoint for `https://stripe-payment-ja8b.onrender.com/webhook`, subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed`, and `payment_intent.canceled`, and set `STRIPE_WEBHOOK_SECRET` to that endpoint's signing secret. Do not use the secret printed by local `stripe listen` in Render. Keep the Stripe secret and publishable keys in the same mode (test or live) as the webhook endpoint. Render supplies `PORT` automatically. If the frontend is hosted on another origin, set `CORS_ORIGIN` to that exact origin; when Render serves this frontend from the same service, leave it unset.
 
 ## API
 
@@ -114,11 +114,14 @@ Inventory reservations remain held while a PaymentIntent can still be retried. A
 
 | Symptom | Likely cause |
 | --- | --- |
-| `No signatures found matching the expected signature` | Wrong `STRIPE_WEBHOOK_SECRET`, or the server was not restarted after editing `.env` |
+| `No signatures found matching the expected signature` | `STRIPE_WEBHOOK_SECRET` does not belong to the configured endpoint or is from the other Stripe mode; on Render use the signing secret for the exact Dashboard endpoint |
 | Message about a raw body or parsed object | `express.json()` was placed above the webhook route in `server.js` |
+| `[startup] Missing required environment variables` | Add each listed variable in Render's environment settings and redeploy/restart the service |
+| `[webhook] PAYMENT MISMATCH` or `missing a valid orderId` | Stripe reached the handler, but the event cannot be matched to the pending database order; verify checkout metadata, order/payment-intent linkage, and that Render points at the intended database |
+| `[webhook] handler crashed` | A database transaction or inventory update failed; inspect the logged error and database connectivity. The handler returns HTTP 500 so Stripe can retry |
 | API requests return 404 | Open the app from `http://localhost:5000/` while Express is running, not from a separate Live Server URL |
 | Nothing logged after paying | `stripe listen` is not running or forwards to the wrong port |
-| Order stays pending | Check the server log for a signature error, `AMOUNT MISMATCH` or a missing `orderId` |
+| Order stays pending | Check the server log for a signature error, `[webhook] PAYMENT MISMATCH`, a missing valid `orderId`, or a database handler error |
 
 ## Going live
 
