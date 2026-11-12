@@ -19,19 +19,26 @@ const query = async  ( text , params ) => {
 // Transaction helper with automatic connection handling & rollback safety
 async function withTransaction(callback) {
   const client = await pool.connect();
+  let transactionStarted = false;
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
+    transactionStarted = true;
     const result = await callback(client);
-    await client.query('COMMIT');
+    await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollubackError) {
+        throw new AggregateError([err, rollbackError], "Transaction and rollback both failed");
+      }
+    }
     throw err;
   } finally {
     client.release();
   }
 }
-
 
 const testConnection = async () => {
       try {

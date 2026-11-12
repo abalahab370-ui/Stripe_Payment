@@ -1,5 +1,5 @@
 const Stripe = require("stripe");
-const { withTransaction } = require("../db");
+const { withTransaction } = require("../config/dbConnection");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
