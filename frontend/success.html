@@ -19,14 +19,39 @@
   <script>
     const statusBox = document.getElementById("status");
     const orderId = new URLSearchParams(location.search).get("orderId");
+    const API_BASE_URL = location.port === "5501"
+      ? `${location.protocol}//${location.hostname}:5000`
+      : "";
+
+    async function fetchJson(url) {
+      let response;
+      try {
+        response = await fetch(url);
+      } catch {
+        throw new Error("Could not reach the server. Make sure the Express app is running and open this page from its URL.");
+      }
+
+      let order;
+      try {
+        order = await response.json();
+      } catch {
+        if (!response.ok) throw new Error(`Could not load order status (HTTP ${response.status}).`);
+        throw new Error("The server returned an invalid JSON response.");
+      }
+
+      if (!response.ok) {
+        throw new Error(typeof order?.error === "string"
+          ? order.error
+          : `Could not load order status (HTTP ${response.status}).`);
+      }
+      return order;
+    }
 
     // The page only DISPLAYS the result. Only the webhook marks an order as paid.
     // Poll OUR database every 1.5 seconds until the webhook has run
     async function pollOrder(triesLeft = 20) {
       try {
-        const response = await fetch(`/api/orders/${orderId}`);
-        const order = await response.json();
-        if (!response.ok) throw new Error(order.error);
+        const order = await fetchJson(`${API_BASE_URL}/api/orders/${encodeURIComponent(orderId)}`);
 
         if (order.status === "paid") return show("Payment received. Thank you!", "paid");
         if (order.status === "failed") return show("Payment failed. Please try again.", "failed");
@@ -43,7 +68,8 @@
       statusBox.className = cssClass;
     }
 
-    pollOrder();
+    if (orderId) pollOrder();
+    else show("Missing order id. Return to checkout and try again.", "failed");
   </script>
 </body>
 </html>

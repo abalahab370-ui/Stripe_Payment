@@ -39,18 +39,49 @@
     const payButton = document.getElementById("pay-button");
     const errorBox = document.getElementById("error");
 
+    const API_BASE_URL = location.port === "5501"
+      ? `${location.protocol}//${location.hostname}:5000`
+      : "";
     let stripe, elements, orderId, products;
+
+    async function fetchJson(url, options, failureMessage) {
+      let response;
+      try {
+        response = await fetch(url, options);
+      } catch {
+        throw new Error("Could not reach the server. Make sure the Express app is running and open this page from its URL.");
+      }
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        if (!response.ok) throw new Error(`${failureMessage} (HTTP ${response.status}).`);
+        throw new Error("The server returned an invalid JSON response.");
+      }
+
+      if (!response.ok) {
+        throw new Error(typeof data?.error === "string"
+          ? data.error
+          : `${failureMessage} (HTTP ${response.status}).`);
+      }
+      return data;
+    }
 
     async function initialize() {
       try {
         const [configResponse, productsResponse] = await Promise.all([
-          fetch("/api/config"),
-          fetch("/api/products"),
+          fetchJson(`${API_BASE_URL}/api/config`, undefined, "Could not load payment settings"),
+          fetchJson(`${API_BASE_URL}/api/products`, undefined, "Could not load products"),
         ]);
-        const config = await configResponse.json();
-        const catalog = await productsResponse.json();
-        if (!configResponse.ok) throw new Error(config.error || "Could not load payment settings.");
-        if (!productsResponse.ok) throw new Error(catalog.error || "Could not load products.");
+        const config = configResponse;
+        const catalog = productsResponse;
+        if (typeof config.publishableKey !== "string" || !config.publishableKey) {
+          throw new Error("Payment settings are missing the publishable key.");
+        }
+        if (!Array.isArray(catalog.products)) {
+          throw new Error("The server returned an invalid product list.");
+        }
 
         stripe = Stripe(config.publishableKey);
         products = catalog.products;
@@ -106,13 +137,14 @@
       checkoutButton.disabled = true;
       errorBox.textContent = "";
       try {
-        const response = await fetch("/api/checkout", {
+        const data = await fetchJson(`${API_BASE_URL}/api/checkout`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ productId: productSelect.value }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error);
+        }, "Could not start checkout");
+        if (!data.clientSecret || !data.orderId) {
+          throw new Error("The server returned incomplete checkout details.");
+        }
         orderId = data.orderId;
         elements = stripe.elements({ clientSecret: data.clientSecret });
         elements.create("payment").mount("#payment-element");
@@ -129,14 +161,17 @@
       payButton.disabled = true;
       errorBox.textContent = "";
 
-      const { error } = await stripe.confirmPayment({
-        elements, // finds the card details and the clientSecret
-        confirmParams: { return_url: `${location.origin}/success.html?orderId=${orderId}` },
-      });
-
-      // Only reached when something went wrong (on success the browser is redirected)
-      errorBox.textContent = error.message;
-      payButton.disabled = false;
+      try {
+        const { error } = await stripe.confirmPayment({
+          elements,
+          confirmParams: { return_url: `${location.origin}/success.html?orderId=${encodeURIComponent(orderId)}` },
+        });
+        if (error) errorBox.textContent = error.message || "Payment could not be confirmed.";
+      } catch (err) {
+        errorBox.textContent = err.message || "Payment could not be confirmed.";
+      } finally {
+        payButton.disabled = false;
+      }
     });
 
     initialize();
