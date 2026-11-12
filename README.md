@@ -87,6 +87,17 @@ Use any future expiry date and any CVC.
 
 Expected result: the page redirects to `success.html`, which shows pending for a moment, then the server logs `order 1 marked as PAID` and the page shows the payment as received.
 
+## Deploy on Render
+
+Create a **Web Service** for this repository and configure:
+
+| Setting | Value |
+| --- | --- |
+| Build Command | `npm install && npm run build` |
+| Start Command | `npm start` |
+
+Add `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, and `DATABASE_URL` in the Render environment settings. Render supplies `PORT` automatically. If the frontend is hosted on another origin, set `CORS_ORIGIN` to that exact origin; when Render serves this frontend from the same service, leave it unset.
+
 ## API
 
 | Route | Description |
