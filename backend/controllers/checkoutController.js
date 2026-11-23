@@ -33,6 +33,24 @@ async function createCheckout(req, res) {
       return res.status(400).json({ error: "A product id is required" });
     }
 
+    await query(`SELECT release_expired_orders()`);
+
+    const { rows: toCancel } = await query(`
+      UPDATE orders
+        SET stripe_canceled = TRUE
+      WHERE status = 'expired'
+        AND stripe_canceled = FALSE
+        AND payment_intent_id IS NOT NULL
+      RETURNING payment_intent_id
+    `);
+
+    for (const row of toCancel) {
+      stripe.paymentIntents.cancel(row.payment_intent_id).catch((err) => {
+        console.warn(`[cleanup] failed to cancel expired intent ${row.payment_intent_id}:`, err.message);
+      });
+    }
+
+
     const reservation = await withTransaction(async (client) => {
       const { rows } = await client.query(
         `SELECT id, name, amount, currency, stock, reserved_stock

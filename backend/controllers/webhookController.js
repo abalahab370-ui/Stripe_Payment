@@ -87,7 +87,10 @@ async function handlePaymentSucceeded(paymentIntent) {
     }
 
     await client.query(
-      "UPDATE orders SET status = 'paid', paid_at = NOW() WHERE id = $1",
+      `UPDATE orders
+        SET status = 'paid', paid_at = NOW()
+       WHERE id = $1
+        AND status = 'pending'`,
       [orderId]
     );
     return "paid";
