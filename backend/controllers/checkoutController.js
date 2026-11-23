@@ -9,6 +9,9 @@ function getConfig(req, res) {
 
 async function getProducts(req, res) {
   try {
+    const cleanupResult = await query(
+      `SELECT release_expired_orders();`
+    );
     const { rows } = await query(
       `SELECT id, name, amount, currency, stock - reserved_stock AS available_stock
          FROM products

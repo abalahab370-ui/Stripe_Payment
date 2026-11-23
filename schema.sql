@@ -15,8 +15,12 @@ CREATE TABLE orders (
   amount            INTEGER NOT NULL CHECK (amount > 0),
   currency          TEXT NOT NULL,
   status            TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'failed', 'paid')),
+                    CHECK (status IN ('pending', 'failed', 'paid' , 'expired')),
   payment_intent_id TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at        TIMESTAMPTZ NOT NULL DEFAULT DATEADD('minute', 15, NOW()),
   paid_at           TIMESTAMPTZ
 );
+
+--pg cron  has been added in supabase in order to run a specific function that releases expired orders ( we can call it to using endpoints when user wants to buy item but then in every checkout u got to do cleaning and calling this function which has trade of but we gonna do it since our project is not active , the pg cron will consume our supabase resources! 
+

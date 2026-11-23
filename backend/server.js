@@ -1,10 +1,5 @@
 require("dotenv").config(); // must run before the routes read process.env
 
-const missingEnv = requiredEnv.filter((name) => !process.env[name]?.trim());
-if (missingEnv.length > 0) {
-  console.error(`[startup] Missing required environment variables: ${missingEnv.join(", ")}`);
-  process.exit(1);
-}
 
 const path = require("path");
 const express = require("express");
@@ -13,7 +8,7 @@ const webhookRoutes = require("./routing/webhook");
 const checkoutRoutes = require("./routing/checkout");
 
 const app = express();
-const allowedOrigin = process.env.CORS_ORIGIN;
+const allowedOrigin = require("./config/corsConfig");
 
 
 app.use(allowedOrigin);
